@@ -161,7 +161,7 @@ function show(rep, bytes) {
   state.url = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
   const a = $('download');
   a.href = state.url;
-  a.download = rep.source.replace(/\.(fit|zip)$/i, '') + '_trek.fit';
+  a.download = rep.source.replace(/\.(fit|zip|gpx|tcx)$/i, '') + '_trek.fit';
 
   drawMap(rep);
   box.scrollIntoView({ behavior: 'smooth', block: 'start' });
