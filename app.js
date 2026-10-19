@@ -93,6 +93,7 @@ $('go').onclick = () => {
       reverse: own && $('reverse').checked,
       keep_spikes: $('keepSpikes').checked,
       ignore_gps: $('ignoreGps').checked,
+      keep_live: $('keepLive').checked,
       laps: $('laps').value,
     },
   });

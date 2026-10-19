@@ -34,7 +34,7 @@ def _expand(files):
 
 def run(files, gpx_name, gpx_data, opts_json):
     """files — [(имя, байты)], gpx_* — свой трек или None, opts — JSON с ключами
-    route (id трассы или ''), distance, reverse, keep_spikes, ignore_gps, laps.
+    route (id трассы или ''), distance, reverse, keep_spikes, ignore_gps, keep_live, laps.
     -> (JSON отчёта, байты FIT или None)."""
     o = json.loads(opts_json)
     try:
@@ -42,6 +42,7 @@ def run(files, gpx_name, gpx_data, opts_json):
         if not fits:
             raise engine.RebuildError('Нет файла тренировки — нужен FIT (или ZIP из Garmin/Strava).')
         params = dict(distance=o.get('distance', 'track'), ignore_gps=bool(o.get('ignore_gps')),
+                      keep_live=bool(o.get('keep_live')),
                       laps=o.get('laps', 'auto'))
         if o.get('route'):
             gpx, preset = routes.load(o['route'])

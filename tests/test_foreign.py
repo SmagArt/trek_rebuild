@@ -50,10 +50,13 @@ def gpx_from(pts):
             f'<trk><trkseg>{body}</trkseg></trk></gpx>').encode()
 
 
-def jam(data, seed=1, live_every=0):
+def jam(data, seed=1, live_every=0, partial=False):
     """GPS пропал, метры и скорость раздуты множителем 1.2–1.4, который плывёт
-    раз в минуту. live_every — раз в столько минут GPS пробивается на минуту."""
+    раз в минуту. live_every — раз в столько минут GPS пробивается на минуту;
+    partial — GPS живой первые 40% времени и последние 20%, глушат середину."""
     f = fit.read(data)
+    ts = [m.timestamp() for m in f.of(20) if m.timestamp() is not None]
+    span = (ts[-1] - ts[0]) or 1
     rnd = random.Random(seed)
     k, carry, prev, t0, minute = 1.3, 0.0, None, None, -1
     for m in f.of(20):
@@ -63,6 +66,8 @@ def jam(data, seed=1, live_every=0):
             minute = (t - t0) // 60
             k = min(1.4, max(1.2, k + rnd.uniform(-0.01, 0.01)))
         live = live_every and minute % live_every == 0
+        if partial:
+            live = not (0.4 <= (t - t0) / span <= 0.8)
         if not live:
             m.set(0, None, 0x85, f.cache) if m.d.index(0) >= 0 else None
             m.set(1, None, 0x85, f.cache) if m.d.index(1) >= 0 else None
@@ -91,7 +96,7 @@ def field_map(m):
     return {num: m.raw[i] for i, (num, _, _) in enumerate(m.d.fields)}
 
 
-def check(path, live_every=0):
+def check(path, live_every=0, partial=False, keep_live=False):
     name = os.path.basename(path)
     src = open(path, 'rb').read()
     try:
@@ -101,9 +106,9 @@ def check(path, live_every=0):
     pts = track_of(f)
     if len(pts) < 200:
         return print(f'ПРОПУСК {name}: нет живого трека с дистанцией')
-    jammed = jam(src, live_every=live_every)
+    jammed = jam(src, live_every=live_every, partial=partial)
     try:
-        out, rep = engine.rebuild([jammed], gpx_from(pts), distance='track')
+        out, rep = engine.rebuild([jammed], gpx_from(pts), distance='track', keep_live=keep_live)
     except engine.RebuildError as e:
         return print(f'ОШИБКА  {name}: {e}')
     g = fit.read(out)
@@ -140,7 +145,8 @@ def check(path, live_every=0):
     off = sorted(haversine(truth[t], got[t]) for t in set(truth) & set(got))
     real_km = pts[-1][2] / 100000
     status = 'OK ' if not lost else 'ПОТЕРИ'
-    mode = f'GPS раз в {live_every} мин' if live_every else 'GPS нет'
+    mode = f'GPS раз в {live_every} мин' if live_every else 'GPS кусками' if partial else 'GPS нет'
+    mode += ', свой GPS' if keep_live else ''
     print(f'{status} {name} [{mode}]: часы {rep["watch_km"]} -> {rep["result_km"]} км (было по GPS {real_km:.2f}), '
           f'сдвиг м: медиана {statistics.median(off):.0f} / 95% {off[int(.95 * len(off))]:.0f} / '
           f'макс {off[-1]:.0f}; {rep["laps"]}; {fp}')
@@ -155,6 +161,8 @@ def main():
     for p in files:
         check(p)
         check(p, live_every=15)
+        check(p, partial=True)
+        check(p, partial=True, keep_live=True)
 
 
 if __name__ == '__main__':

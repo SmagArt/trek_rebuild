@@ -146,6 +146,7 @@ footer { color: var(--muted); font-size: 13px; text-align: center; margin-top: 2
     <label class="opt"><input type="radio" name="dist" value="sensor"> <span>Своему датчику<small>У тебя Stryd или другой подножный датчик, и он не отваливался — его метры остаются, трасса нужна только для карты.</small></span></label>
     <details>
       <summary>Тонкие настройки</summary>
+      <label class="opt"><input type="checkbox" id="keepLive"> <span>Где GPS ловил — оставить свой трек<small>Трассой залатаются только куски, где глушили. Для пробежек, где GPS пропадал местами, а маршрут не совсем по трассе.</small></span></label>
       <label class="opt"><input type="checkbox" id="ignoreGps"> <span>Не верить GPS часов совсем<small>Если часы рисовали точки в чистом поле или на другом берегу — подмена сигнала.</small></span></label>
       <label class="opt"><input type="checkbox" id="keepSpikes"> <span>Не срезать развороты<small>Для своего трека с разворотом «туда-обратно»: иначе острый разворот может принять за ошибку рисовки.</small></span></label>
       <label class="opt"><span>Круги:&nbsp;

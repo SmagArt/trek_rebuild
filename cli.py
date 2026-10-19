@@ -31,6 +31,7 @@ def main():
     ap.add_argument('--reverse', action='store_true', help='трек в обратную сторону')
     ap.add_argument('--keep-spikes', action='store_true', help='не срезать развороты туда-обратно')
     ap.add_argument('--ignore-gps', action='store_true', help='не привязываться к GPS часов')
+    ap.add_argument('--keep-live', action='store_true', help='где GPS живой — оставить свой трек')
     ap.add_argument('--laps', default='auto', choices=('auto', 'keep', 'km'))
     ap.add_argument('--anchors', default='auto', choices=('auto', 'time', 'space'))
     a = ap.parse_args()
@@ -43,7 +44,7 @@ def main():
         ap.error('нужны куски .fit, -o и ровно одно из --gpx / --route')
 
     opts = dict(distance=a.distance, reverse=a.reverse, keep_spikes=a.keep_spikes,
-                ignore_gps=a.ignore_gps, laps=a.laps, anchors=a.anchors)
+                ignore_gps=a.ignore_gps, keep_live=a.keep_live, laps=a.laps, anchors=a.anchors)
     if a.route:
         gpx, preset = routes.load(a.route)
         opts.update(preset)

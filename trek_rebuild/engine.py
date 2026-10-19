@@ -54,6 +54,12 @@ SPEED_CAP = {1: 7.0, 11: 7.0, 17: 7.0, 2: 25.0}   # бег, ходьба, пох
 SPEED_CAP_DEFAULT = 15.0
 DESPIKE_PAUSE_S = 60   # через паузу короче — раскладываем, длиннее — граница окна
 
+# keep_live: где GPS живой, трек остаётся свой, трассой латаются только дыры
+LIVE_MIN_S = 60        # кусок живого GPS короче — не доверяем
+LIVE_JUMP_M = 30       # прыжок фикса сверх потолка скорости рвёт кусок
+LIVE_NEAR_M = 100      # медиана дальше от трассы — подмена сигнала, не живой GPS
+LIVE_BLEND_S = 120     # за столько секунд в дыре гаснет поправка от края живого куска
+
 TIMER_START = 0
 TIMER_STOPS = {1, 4, 8, 9}        # stop, stop_all, stop_disable, stop_disable_all
 
@@ -416,6 +422,31 @@ def anchors_by_space(recs, bad, poly, cum):
     return anchors
 
 
+def live_stretches(recs, bad, poly, cap):
+    """[(i, j)] — куски живого GPS: фикс есть и не замёрз, без прыжков быстрее потолка,
+    не короче LIVE_MIN_S и по медиане не дальше LIVE_NEAR_M от трассы."""
+    out, n, i = [], len(recs), 0
+    while i < n:
+        if bad[i]:
+            i += 1
+            continue
+        j = i
+        while j + 1 < n and not bad[j + 1]:
+            a, b = recs[j], recs[j + 1]
+            if haversine((a['lat'], a['lon']), (b['lat'], b['lon'])) > \
+                    cap * max(b['ts'] - a['ts'], 1) + LIVE_JUMP_M:
+                break
+            j += 1
+        if recs[j]['ts'] - recs[i]['ts'] >= LIVE_MIN_S:
+            ds = sorted(min(seg_proj(poly[k], poly[k + 1], (recs[x]['lat'], recs[x]['lon']))[0]
+                            for k in range(len(poly) - 1))
+                        for x in range(i, j + 1, max(1, (j - i) // 30)))
+            if ds[len(ds) // 2] <= LIVE_NEAR_M:
+                out.append((i, j))
+        i = j + 1
+    return out
+
+
 # ── круги ───────────────────────────────────────────────────────────────────
 
 def auto_lap_step(laps_in):
@@ -495,8 +526,9 @@ def set_speed_pair(m, num16, num32, val, cache, add16=True):
 # ── главный проход ──────────────────────────────────────────────────────────
 
 def rebuild(fits, gpx, distance='track', reverse=False, keep_spikes=False, ignore_gps=False,
-            anchors='auto', order=None, laps='auto', timeless=False, preset=False):
+            anchors='auto', order=None, laps='auto', timeless=False, preset=False, keep_live=False):
     """fits — байты кусков FIT (порядок неважен), gpx — байты трека.
+    keep_live — где GPS часов живой, оставить его трек, трассой залатать только дыры.
     reverse — трек в обратную сторону; timeless — не верить времени точек GPX
     (встроенные трассы, нарисованные в редакторе); preset — трек проверенный,
     замечания к его рисовке не нужны; laps: auto — авто-круги
@@ -674,6 +706,8 @@ def rebuild(fits, gpx, distance='track', reverse=False, keep_spikes=False, ignor
         p = at_distance(poly, cum, L[x])
         r['plat'], r['plon'], r['lele'] = p[0], p[1], p[2]
         r['dist'] = r['d'] if distance == 'sensor' else L[x]
+    if keep_live:
+        _keep_live(recs, bad, poly, cum, L, spans, cap, distance, log, notes, hm)
     pause_aware_speed(recs, spans)
 
     # ── длинные прямые на линии ──
@@ -723,6 +757,63 @@ def rebuild(fits, gpx, distance='track', reverse=False, keep_spikes=False, ignor
         'warnings': warns, 'notes': notes, 'log': log,
     }
     return data, report
+
+
+def _shift(r, poly, cum, at):
+    """Живой фикс минус точка трассы, где запись стоит по якорям (градусы)."""
+    p = at_distance(poly, cum, at)
+    return r['lat'] - p[0], r['lon'] - p[1]
+
+
+def _keep_live(recs, bad, poly, cum, L, spans, cap, distance, log, notes, hm):
+    """Живой GPS поверх трассы: на живых кусках координаты часов, в дырах — трасса,
+    как её разложили якоря. В режиме трассы метры — по итоговым координатам."""
+    stretches = live_stretches(recs, bad, poly, cap)
+    if not stretches:
+        notes.append('живых кусков GPS (от минуты, рядом с трассой) не нашлось — весь трек по трассе')
+        return
+    n = len(recs)
+    live = [False] * n
+    for i, j in stretches:
+        for x in range(i, j + 1):
+            live[x] = True
+            r = recs[x]
+            r['plat'], r['plon'], r['lele'] = r['lat'], r['lon'], None
+    secs = sum(recs[j]['ts'] - recs[i]['ts'] for i, j in stretches)
+    notes.append(f'свой GPS оставлен на {len(stretches)} кусках, {secs // 60} мин из '
+                 f'{(recs[-1]["ts"] - recs[0]["ts"]) // 60} — остальное по трассе')
+    log.append('Живой GPS: ' + ', '.join(f'{hm(recs[i]["ts"])}–{hm(recs[j]["ts"])}' for i, j in stretches))
+
+    # Дыры: точка трассы плюс поправка «живой фикс − трасса» с краёв дыры,
+    # которая гаснет за LIVE_BLEND_S — на стыках не остаётся прыжка, а середина
+    # длинной дыры идёт ровно по трассе
+    prev = [-1] + [k for _, k in stretches]
+    nxt = [i for i, _ in stretches] + [n]
+    for a, b in zip(prev, nxt):
+        if b - a < 2:
+            continue
+        da = _shift(recs[a], poly, cum, L[a]) if a >= 0 else (0.0, 0.0)
+        db = _shift(recs[b], poly, cum, L[b]) if b < n else (0.0, 0.0)
+        ta, tb = recs[max(a, 0)]['ts'], recs[min(b, n - 1)]['ts']
+        blend = min(LIVE_BLEND_S, max(tb - ta, 1))
+        for x in range(a + 1, b):
+            wa = max(0.0, 1 - (recs[x]['ts'] - ta) / blend) if a >= 0 else 0.0
+            wb = max(0.0, 1 - (tb - recs[x]['ts']) / blend) if b < n else 0.0
+            if wa + wb > 1:
+                wa, wb = wa / (wa + wb), wb / (wa + wb)
+            recs[x]['plat'] += da[0] * wa + db[0] * wb
+            recs[x]['plon'] += da[1] * wa + db[1] * wb
+    if distance == 'sensor':
+        return
+    pz = [any(s <= r['ts'] < e for s, e in spans) for r in recs]
+    dist = [0.0] * n
+    for x in range(1, n):
+        step = 0.0 if pz[x] else haversine((recs[x - 1]['plat'], recs[x - 1]['plon']),
+                                           (recs[x]['plat'], recs[x]['plon']))
+        dist[x] = dist[x - 1] + step
+    despike([r['ts'] for r in recs], dist, spans, cap)
+    for r, d in zip(recs, dist):
+        r['dist'] = d
 
 
 def _pace(dist, timer):
