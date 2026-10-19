@@ -27,7 +27,7 @@ def main():
     ap.add_argument('--route', choices=list(routes.PRESETS), help='встроенная трасса')
     ap.add_argument('--routes', action='store_true', help='показать встроенные трассы')
     ap.add_argument('-o', '--out', help='куда записать .fit')
-    ap.add_argument('--distance', default='track', choices=('track', 'sensor'))
+    ap.add_argument('--distance', default='track', choices=('track', 'sensor', 'time'))
     ap.add_argument('--reverse', action='store_true', help='трек в обратную сторону')
     ap.add_argument('--keep-spikes', action='store_true', help='не срезать развороты туда-обратно')
     ap.add_argument('--ignore-gps', action='store_true', help='не привязываться к GPS часов')

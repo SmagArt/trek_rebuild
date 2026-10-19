@@ -18,6 +18,8 @@
                    распределены по времени (стоянки остаются стоянками). Режим под глушилку.
 --distance sensor  метры из потока distance часов как есть (Stryd, датчик колеса);
                    линия даёт только карту.
+--distance time    метры = длина линии, распределены по времени движения: метрам
+                   часов верить нельзя (велокомпьютер без датчика мерил по GPS).
 
 Форма всегда из GPX. Якоря — секунды, где живой фикс часов лёг на линию (<15 м):
 по времени точки GPX, если время в треке есть, иначе поиском вперёд по линии.
@@ -534,7 +536,7 @@ def rebuild(fits, gpx, distance='track', reverse=False, keep_spikes=False, ignor
     замечания к его рисовке не нужны; laps: auto — авто-круги
     перенарезать по км, остальные сохранить; keep; km.
     Возвращает (байты FIT, отчёт). Ошибки входа — RebuildError с текстом для человека."""
-    if distance not in ('track', 'sensor'):
+    if distance not in ('track', 'sensor', 'time'):
         raise ValueError(distance)
     log, warns, notes = [], [], []
 
@@ -572,9 +574,10 @@ def rebuild(fits, gpx, distance='track', reverse=False, keep_spikes=False, ignor
     watch_m = sum(p['recs'][-1]['d'] for p in pieces)
     recs, events = merge(pieces)
     n = len(recs)
-    if recs[-1]['d'] <= recs[0]['d']:
-        # Ни метров, ни скорости (GPX из редактора): ход меряем временем движения —
-        # иначе после дыры поиск якорей не знает, как далеко человек ушёл
+    if distance == 'time' or recs[-1]['d'] <= recs[0]['d']:
+        # Ход меряем временем движения: метров нет (GPX из редактора) или им нельзя
+        # верить (time — велокомпьютер без датчика скорости мерил по глушёному GPS).
+        # Без этого после дыры поиск якорей не знает, как далеко человек ушёл
         sp, acc = paused_spans(events), 0.0
         for a, b in zip(recs, recs[1:]):
             acc += (b['ts'] - a['ts']) - paused_between(sp, a['ts'], b['ts'])
@@ -764,6 +767,8 @@ def rebuild(fits, gpx, distance='track', reverse=False, keep_spikes=False, ignor
         'watch_km': round(watch_m / 1000, 2), 'track_km': round(cum[-1] / 1000, 2),
         'result_km': round(dist / 1000, 2),
         'pace': _pace(dist, elapsed - paused),
+        'speed': round(dist / 1000 / ((elapsed - paused) / 3600), 1) if elapsed > paused and dist > 0 else None,
+        'sport': pieces[0]['sport'],
         'mode': distance, 'pieces': len(pieces), 'records': len(rr),
         'laps': lap_info,
         'track': [(round(p[0], 6), round(p[1], 6)) for p in poly],

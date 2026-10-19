@@ -49,12 +49,11 @@ dropZone($('dropGpx'), $('gpxInput'), async (files) => {
 // ── настройки ───────────────────────────────────────────────────────────────
 
 // закладки трасс: id встроенной трассы или '' — свой GPX
-let tab = 'coferan';
+let tab = 'own';
 
 function route() {
-  if (tab === 'nab') return 'naberezhnaya';
   if (tab === 'own') return '';
-  return document.querySelector('input[name="dir"]:checked').value;
+  return document.querySelector('input[name="preset"]:checked').value;
 }
 
 document.querySelectorAll('[role="tab"]').forEach((b) => {
@@ -142,7 +141,8 @@ function show(rep, bytes) {
   const changed = rep.watch_km > 0 && Math.abs(rep.watch_km - rep.result_km) >= 0.01;
   $('big').innerHTML = `
     <div><span>Дистанция</span><strong>${km(rep.result_km)} км</strong>${changed ? ` <s>${km(rep.watch_km)}</s>` : ''}</div>
-    <div><span>Темп</span><strong>${rep.pace || '—'}</strong> /км</div>
+    ${rep.sport === 2 ? `<div><span>Скорость</span><strong>${rep.speed ? String(rep.speed).replace('.', ',') : '—'}</strong> км/ч</div>`
+      : `<div><span>Темп</span><strong>${rep.pace || '—'}</strong> /км</div>`}
     <div><span>Время в движении</span><strong>${rep.timer}</strong></div>`;
 
   const ul = $('msgs');
