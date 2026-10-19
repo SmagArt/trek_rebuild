@@ -36,7 +36,7 @@ h1 { font-size: 28px; line-height: 1.2; margin: 8px 0 6px; letter-spacing: -0.01
 .step b { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
   background: var(--accent); color: var(--accent-ink); font-size: 14px; flex: none; }
 .step h2 { font-size: 18px; margin: 0; }
-.drop { border: 2px dashed var(--line); border-radius: 12px; padding: 22px 14px; text-align: center;
+.drop { display: block; border: 2px dashed var(--line); border-radius: 12px; padding: 22px 14px; text-align: center;
   cursor: pointer; color: var(--muted); transition: border-color .15s, background .15s; }
 .drop.over, .drop:hover { border-color: var(--accent); background: var(--soft); }
 .drop input { display: none; }
@@ -74,6 +74,10 @@ select { font: inherit; padding: 6px 8px; border-radius: 8px; border: 1px solid 
 .error { color: var(--warn); font-weight: 600; }
 a { color: var(--accent); }
 .dl { display: block; text-align: center; text-decoration: none; }
+.why h2 { font-size: 18px; margin: 0 0 8px; }
+.why p { margin: 6px 0; }
+.why ul { margin: 8px 0; padding-left: 20px; }
+.why li { margin: 6px 0; }
 .how h3 { font-size: 16px; margin: 16px 0 4px; }
 .how p, .how ol { margin: 4px 0; }
 .how ol { padding-left: 22px; }
@@ -86,6 +90,20 @@ footer { color: var(--muted); font-size: 13px; text-align: center; margin-top: 2
 <main>
   <h1>Трек под глушилкой</h1>
   <p class="lead">GPS заглушили — часы насчитали лишние километры и нарисовали ерунду. Даёшь файл тренировки и трассу, получаешь файл с правильной дистанцией, темпом и картой. Пульс, каденс, мощность и всё остальное с часов остаётся как было. Файлы никуда не отправляются — всё считается прямо в браузере.</p>
+
+  <section class="card why">
+    <h2>Зачем это нужно</h2>
+    <p>Без спутников часы считают дистанцию по шагам и закладывают шаг длиннее настоящего. На набережной это лишние 25–30%: пробежал 22 км, а записано 28. Дальше врёт всё, что посчитано от дистанции:</p>
+    <ul>
+      <li><b>Темп</b> — средний и по километрам выходит быстрее, чем ты бежал. Темповую или интервалы не оценить, сравнить с прошлой неделей — тоже.</li>
+      <li><b>Сплиты и круги по километру</b> — часы режут «км» по своей неверной дистанции, и отрезок «1 км» на деле 770 м.</li>
+      <li><b>Рекорды</b> — Strava и часы находят «лучшие 5 км и 10 км» внутри забега, а с завышенной дистанцией это ложные личники, которые потом не побить.</li>
+      <li><b>Объёмы</b> — недельный и месячный километраж, итоги года, пробег кроссовок.</li>
+      <li><b>Зачёт клуба</b> — где считают дистанцию и темп по треку, лишние или пропавшие километры меняют результат.</li>
+      <li><b>Карта</b> — вместо маршрута зигзаги, прыжки через реку и точки в чистом поле; сегменты Strava не засчитываются.</li>
+    </ul>
+    <p>Здесь форма маршрута берётся из трассы, а часы только раскладывают её по времени: где быстрее, где медленнее, где стоял. Темп по километрам после этого — твой настоящий.</p>
+  </section>
 
   <section class="card">
     <div class="step"><b>1</b><h2>Файл тренировки</h2></div>
@@ -161,8 +179,8 @@ footer { color: var(--muted); font-size: 13px; text-align: center; margin-top: 2
     <p>Тренировка на сайте → «…» → «Экспорт оригинала». Залить: удали старую, затем <a href="https://www.strava.com/upload/select" target="_blank" rel="noopener">strava.com/upload/select</a>.</p>
     <h3>Amazfit / Zepp</h3>
     <p>Zepp сам FIT не отдаёт. Если тренировка ушла в Strava — бери там «Экспорт оригинала». Залить: удали исходник в Zepp, затем импорт файла в приложении.</p>
-    <h3>Почему так работает</h3>
-    <p>Без спутников часы считают дистанцию по шагам и закладывают длину шага, которой у тебя нет — на набережной это лишние 25–30%. Здесь форма маршрута берётся из трассы, а часы только раскладывают её по времени: где быстрее, где медленнее, где стоял. Если GPS иногда пробивался, точки привязываются к трассе и раскладка становится точнее.</p>
+    <h3>Насколько точно</h3>
+    <p>Итоговая дистанция — ровно длина трассы. Раскладка внутри неё зависит от того, насколько ровно часы считали шаги: вслепую точки ложатся в среднем в 30–50 м от настоящих, а если GPS хотя бы иногда пробивался — в 5–15 м, потому что каждая живая точка привязывает трек к трассе.</p>
     <p class="fine">Пробежал не всю трассу, а кусок — нарисуй свой трек именно того, что пробежал.</p>
   </section>
 
