@@ -139,7 +139,7 @@ function show(rep, bytes) {
   $('status').textContent = '';
   box.classList.remove('hidden');
   $('resTitle').textContent = `Готово · ${rep.date}, ${rep.start.slice(0, 5)}`;
-  const changed = Math.abs(rep.watch_km - rep.result_km) >= 0.01;
+  const changed = rep.watch_km > 0 && Math.abs(rep.watch_km - rep.result_km) >= 0.01;
   $('big').innerHTML = `
     <div><span>Дистанция</span><strong>${km(rep.result_km)} км</strong>${changed ? ` <s>${km(rep.watch_km)}</s>` : ''}</div>
     <div><span>Темп</span><strong>${rep.pace || '—'}</strong> /км</div>

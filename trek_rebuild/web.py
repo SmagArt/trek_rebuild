@@ -2,34 +2,53 @@
 """Прослойка для страницы (Pyodide): файлы с именами -> FIT + отчёт в JSON.
 
 ZIP распаковывается: Garmin Connect и Strava отдают «оригинал» тренировки
-архивом, а человек с телефона перетащит его как есть.
+архивом, а человек с телефона перетащит его как есть. Тренировка в GPX (с временем
+у точек) или TCX переводится в FIT (convert.py); GPX без времени — это трасса.
 """
 import io
 import json
 import zipfile
 
-from . import engine, routes
+from . import convert, engine, routes
 
 
 def _expand(files):
-    """[(имя, байты)] -> [(имя, байты FIT)], GPX из архива — отдельно."""
-    fits, gpx = [], None
-    for name, data in files:
+    """[(имя, байты)] -> ([(имя, байты FIT)], GPX-трасса или None, [имена из GPX/TCX])."""
+    fits, gpx, converted = [], None, []
+
+    def one(name, data):
+        nonlocal gpx
         low = name.lower()
-        if low.endswith('.zip') or data[:2] == b'PK':
+        if low.endswith('.tcx') or (low.endswith('.gpx') and convert.is_activity_gpx(data)):
             try:
-                z = zipfile.ZipFile(io.BytesIO(data))
-            except zipfile.BadZipFile:
-                raise engine.RebuildError(f'{name}: архив не открывается') from None
-            inner = [n for n in z.namelist() if n.lower().endswith('.fit')]
-            if not inner:
-                raise engine.RebuildError(f'{name}: в архиве нет FIT-файла')
-            fits += [(n.rsplit('/', 1)[-1], z.read(n)) for n in inner]
+                fits.append((name, convert.to_fit(data, name)))
+            except convert.ConvertError as e:
+                raise engine.RebuildError(str(e)) from None
+            converted.append(name)
         elif low.endswith('.gpx'):
             gpx = data
         else:
             fits.append((name, data))
-    return fits, gpx
+
+    for name, data in files:
+        if name.lower().endswith('.zip') or data[:2] == b'PK':
+            try:
+                z = zipfile.ZipFile(io.BytesIO(data))
+            except zipfile.BadZipFile:
+                raise engine.RebuildError(f'{name}: архив не открывается') from None
+            inner = [n for n in z.namelist() if n.lower().endswith(('.fit', '.gpx', '.tcx'))]
+            if not inner:
+                raise engine.RebuildError(f'{name}: в архиве нет файла тренировки (FIT, GPX, TCX)')
+            for n in inner:
+                one(n.rsplit('/', 1)[-1], z.read(n))
+        else:
+            one(name, data)
+    return fits, gpx, converted
+
+
+CONVERTED_NOTE = ('тренировка была в GPX/TCX — FIT собран заново из того, что в нём было (время, пульс, '
+                  'каденс, мощность). Если дистанции часов в файле не было, трасса разложена по времени '
+                  'движения и темп по километрам усреднён; круг — один на всю тренировку')
 
 
 def run(files, gpx_name, gpx_data, opts_json):
@@ -38,9 +57,9 @@ def run(files, gpx_name, gpx_data, opts_json):
     -> (JSON отчёта, байты FIT или None)."""
     o = json.loads(opts_json)
     try:
-        fits, gpx_in_zip = _expand(files)
+        fits, gpx_in_zip, converted = _expand(files)
         if not fits:
-            raise engine.RebuildError('Нет файла тренировки — нужен FIT (или ZIP из Garmin/Strava).')
+            raise engine.RebuildError('Нет файла тренировки — нужен FIT, GPX или TCX с часов (или ZIP из Garmin/Strava).')
         params = dict(distance=o.get('distance', 'track'), ignore_gps=bool(o.get('ignore_gps')),
                       keep_live=bool(o.get('keep_live')),
                       laps=o.get('laps', 'auto'))
@@ -54,6 +73,8 @@ def run(files, gpx_name, gpx_data, opts_json):
                 raise engine.RebuildError('Выбери трассу из списка или загрузи свой трек (GPX).')
             params.update(reverse=bool(o.get('reverse')), keep_spikes=bool(o.get('keep_spikes')))
         data, rep = engine.rebuild([d for _, d in fits], gpx, **params)
+        if converted:
+            rep['notes'] = [CONVERTED_NOTE] + [n for n in rep['notes'] if 'ни дистанции, ни скорости' not in n]
         rep['ok'] = True
         rep['source'] = fits[0][0]
         return json.dumps(rep, ensure_ascii=False), data

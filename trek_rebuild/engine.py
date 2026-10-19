@@ -572,6 +572,13 @@ def rebuild(fits, gpx, distance='track', reverse=False, keep_spikes=False, ignor
     watch_m = sum(p['recs'][-1]['d'] for p in pieces)
     recs, events = merge(pieces)
     n = len(recs)
+    if recs[-1]['d'] <= recs[0]['d']:
+        # Ни метров, ни скорости (GPX из редактора): ход меряем временем движения —
+        # иначе после дыры поиск якорей не знает, как далеко человек ушёл
+        sp, acc = paused_spans(events), 0.0
+        for a, b in zip(recs, recs[1:]):
+            acc += (b['ts'] - a['ts']) - paused_between(sp, a['ts'], b['ts'])
+            b['d'] = acc
 
     # ── линия ──
     segs, timed = read_gpx(gpx)
@@ -667,10 +674,18 @@ def rebuild(fits, gpx, distance='track', reverse=False, keep_spikes=False, ignor
             warns.append(f'{span}: часы почти стояли ({ds:.0f} м), а трек {lg:.0f} м — лишний кусок в треке?')
 
     # ── положение на линии и метры ──
+    spans = paused_spans(events)
+    # время в движении от начала: без метров часов трасса раскладывается по нему,
+    # чтобы в паузах точка стояла
+    mv, acc = [0.0] * n, 0.0
+    for x in range(1, n):
+        a, b = recs[x - 1]['ts'], recs[x]['ts']
+        acc += (b - a) - paused_between(spans, a, b)
+        mv[x] = acc
     L = [0.0] * n
     for (xa, La), (xb, Lb) in zip(anc, anc[1:]):
         Da, Db = recs[xa]['d'], recs[xb]['d']
-        ta, tb = recs[xa]['ts'], recs[xb]['ts']
+        ta, tb = mv[xa], mv[xb]
         if distance == 'sensor':
             byd = (Db - Da) > 0 and (Db - Da) >= 0.5 * (Lb - La)
         else:
@@ -679,13 +694,12 @@ def rebuild(fits, gpx, distance='track', reverse=False, keep_spikes=False, ignor
             if byd:
                 f_ = (recs[x]['d'] - Da) / (Db - Da)
             else:
-                f_ = (recs[x]['ts'] - ta) / (tb - ta) if tb > ta else 0.0
+                f_ = (mv[x] - ta) / (tb - ta) if tb > ta else 0.0
             L[x] = La + (Lb - La) * min(max(f_, 0.0), 1.0)
 
     # ── ступеньки ──
     cap = SPEED_CAP.get(pieces[0]['sport'], SPEED_CAP_DEFAULT)
     tss = [r['ts'] for r in recs]
-    spans = paused_spans(events)
     fixed, left = despike(tss, L, spans, cap)
     if distance == 'sensor':
         dd = [r['d'] for r in recs]

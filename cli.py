@@ -17,12 +17,12 @@ for _stream in (sys.stdout, sys.stderr):
         _stream.reconfigure(encoding="utf-8", errors="replace")
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from trek_rebuild import engine, routes  # noqa: E402
+from trek_rebuild import engine, routes, web  # noqa: E402
 
 
 def main():
     ap = argparse.ArgumentParser(description='Перенос тренировки на нарисованный трек')
-    ap.add_argument('src', nargs='*', help='куски .fit (порядок неважен)')
+    ap.add_argument('src', nargs='*', help='куски .fit / .gpx / .tcx / .zip (порядок неважен)')
     ap.add_argument('--gpx', help='свой трек')
     ap.add_argument('--route', choices=list(routes.PRESETS), help='встроенная трасса')
     ap.add_argument('--routes', action='store_true', help='показать встроенные трассы')
@@ -53,7 +53,10 @@ def main():
     else:
         gpx = open(a.gpx, 'rb').read()
     try:
-        data, rep = engine.rebuild([open(p, 'rb').read() for p in a.src], gpx, **opts)
+        fits, _, converted = web._expand([(os.path.basename(p), open(p, 'rb').read()) for p in a.src])
+        data, rep = engine.rebuild([d for _, d in fits], gpx, **opts)
+        if converted:
+            rep['notes'].insert(0, web.CONVERTED_NOTE)
     except engine.RebuildError as e:
         sys.exit(f'Ошибка: {e}')
     with open(a.out, 'wb') as fh:
