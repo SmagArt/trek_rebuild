@@ -219,6 +219,16 @@ def load_piece(f, idx, ignore_gps):
         r['d'] = carry
         prev_t = r['ts']
 
+    s = next(iter(f.of(SESSION)), None)
+    # Без потока distance интеграл скорости расходится с итогом часов (Zepp: 20.5 против 26.0) —
+    # подгоняем под дистанцию сессии, её часы и показывают
+    total = s.get(9) / 100 if s is not None and s.get(9) else 0
+    scaled = not has_dist and total > 0 and carry > 0
+    if scaled:
+        k = total / carry
+        for r in recs:
+            r['d'] *= k
+
     events = sorted(({'ts': m.timestamp(), 'type': m.get(1)}
                      for m in f.of(EVENT) if m.get(0) == 0 and m.timestamp() is not None),
                     key=lambda e: e['ts'])
@@ -227,14 +237,13 @@ def load_piece(f, idx, ignore_gps):
     if events[-1]['type'] == TIMER_START:
         events.append({'ts': recs[-1]['ts'], 'type': 4})
 
-    s = next(iter(f.of(SESSION)), None)
     a = next(iter(f.of(ACTIVITY)), None)
     offset = None
     if a is not None and a.get(5) is not None and a.timestamp() is not None:
         offset = a.get(5) - a.timestamp()
         if abs(offset) > 14 * 3600:
             offset = None
-    return {'idx': idx, 'file': f, 'recs': recs, 'events': events, 'has_dist': has_dist,
+    return {'idx': idx, 'file': f, 'recs': recs, 'events': events, 'has_dist': has_dist or scaled,
             'has_speed': has_speed, 'offset': offset,
             'sport': s.get(5) if s is not None and s.get(5) is not None else 0}
 
