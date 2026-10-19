@@ -585,7 +585,8 @@ def rebuild(fits, gpx, distance='track', reverse=False, keep_spikes=False, ignor
         near = min(min(seg_proj(poly[i], poly[i + 1], q)[0] for i in range(0, len(poly) - 1))
                    for q in sample)
         if near > 300:
-            warns.append(f'GPS часов ни разу не подошёл к трассе ближе {near:.0f} м — похоже, выбрана не та '
+            far = f'{near:.0f} м' if near < 10000 else f'{near / 1000:.0f} км'
+            warns.append(f'GPS часов ни разу не подошёл к трассе ближе {far} — похоже, выбрана не та '
                          f'трасса. Если трасса та, а часы рисовали точки где попало (подмена сигнала), '
                          f'включи «Не верить GPS часов совсем»')
         elif live <= 0:
