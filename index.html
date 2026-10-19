@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Трек под глушилкой</title>
+<meta name="description" content="Исправить дистанцию и карту тренировки, когда GPS глушат: FIT с часов + нарисованный трек. Файлы не покидают телефон.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23e8590c'/%3E%3Cpath d='M7 24c4-10 8 2 12-8s5-6 6-8' stroke='white' stroke-width='3' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root {
+  --bg: #f4f2ee; --card: #ffffff; --ink: #1d1f22; --muted: #6a6f76; --line: #e2ded6;
+  --accent: #e8590c; --accent-ink: #ffffff; --ok: #2b8a3e; --warn: #c92a2a; --note: #8a6d00;
+  --soft: #fbf3ec; --track: #e8590c; --gps: #8a9099;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15171a; --card: #1e2125; --ink: #eceae6; --muted: #9aa0a6; --line: #30343a;
+    --accent: #ff7a2e; --accent-ink: #15171a; --ok: #51cf66; --warn: #ff6b6b; --note: #ffd43b;
+    --soft: #2a221c; --track: #ff7a2e; --gps: #7c838c;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15171a; --card: #1e2125; --ink: #eceae6; --muted: #9aa0a6; --line: #30343a;
+  --accent: #ff7a2e; --accent-ink: #15171a; --ok: #51cf66; --warn: #ff6b6b; --note: #ffd43b;
+  --soft: #2a221c; --track: #ff7a2e; --gps: #7c838c;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 720px; margin: 0 auto; padding: 20px 16px 48px; }
+h1 { font-size: 28px; line-height: 1.2; margin: 8px 0 6px; letter-spacing: -0.01em; }
+.lead { color: var(--muted); margin: 0 0 20px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; margin: 14px 0; }
+.step { display: flex; gap: 10px; align-items: baseline; margin: 0 0 12px; }
+.step b { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
+  background: var(--accent); color: var(--accent-ink); font-size: 14px; flex: none; }
+.step h2 { font-size: 18px; margin: 0; }
+.drop { border: 2px dashed var(--line); border-radius: 12px; padding: 22px 14px; text-align: center;
+  cursor: pointer; color: var(--muted); transition: border-color .15s, background .15s; }
+.drop.over, .drop:hover { border-color: var(--accent); background: var(--soft); }
+.drop input { display: none; }
+.files { list-style: none; padding: 0; margin: 10px 0 0; }
+.files li { display: flex; justify-content: space-between; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 15px; word-break: break-all; }
+.files button { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 18px; line-height: 1; }
+label.opt { display: flex; gap: 10px; align-items: flex-start; padding: 9px 0; cursor: pointer; }
+label.opt input { margin-top: 4px; accent-color: var(--accent); flex: none; }
+label.opt small { display: block; color: var(--muted); font-size: 14px; }
+.tabs { display: flex; gap: 4px; background: var(--bg); border-radius: 12px; padding: 4px; margin-bottom: 10px; }
+.tabs button { flex: 1; font: inherit; font-size: 15px; padding: 9px 6px; border: 0; border-radius: 9px;
+  background: transparent; color: var(--muted); cursor: pointer; }
+.tabs button[aria-selected="true"] { background: var(--card); color: var(--ink); font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+.panel .fine { margin: 4px 0 6px; }
+details { margin-top: 6px; }
+summary { cursor: pointer; color: var(--muted); }
+select { font: inherit; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink); }
+.go { width: 100%; font: inherit; font-weight: 600; font-size: 18px; padding: 14px; border: 0; border-radius: 12px;
+  background: var(--accent); color: var(--accent-ink); cursor: pointer; }
+.go:disabled { opacity: .5; cursor: progress; }
+.status { color: var(--muted); font-size: 14px; text-align: center; margin: 8px 0 0; min-height: 1.5em; }
+.big { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin: 4px 0 14px; }
+.big div { background: var(--soft); border-radius: 10px; padding: 10px 12px; }
+.big span { display: block; color: var(--muted); font-size: 13px; }
+.big strong { font-size: 22px; font-variant-numeric: tabular-nums; }
+.big s { color: var(--muted); font-weight: 400; font-size: 16px; }
+#map { height: 340px; border-radius: 12px; margin: 12px 0; border: 1px solid var(--line); }
+.legend { display: flex; gap: 16px; font-size: 14px; color: var(--muted); flex-wrap: wrap; }
+.legend i { display: inline-block; width: 18px; height: 4px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+.msgs { list-style: none; padding: 0; margin: 10px 0; }
+.msgs li { padding: 8px 10px; border-radius: 8px; margin: 6px 0; font-size: 15px; }
+.msgs .w { background: color-mix(in srgb, var(--warn) 12%, transparent); border-left: 3px solid var(--warn); }
+.msgs .n { background: color-mix(in srgb, var(--note) 12%, transparent); border-left: 3px solid var(--note); }
+.error { color: var(--warn); font-weight: 600; }
+a { color: var(--accent); }
+.dl { display: block; text-align: center; text-decoration: none; }
+.how h3 { font-size: 16px; margin: 16px 0 4px; }
+.how p, .how ol { margin: 4px 0; }
+.how ol { padding-left: 22px; }
+.fine { color: var(--muted); font-size: 14px; }
+.hidden { display: none; }
+footer { color: var(--muted); font-size: 13px; text-align: center; margin-top: 28px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Трек под глушилкой</h1>
+  <p class="lead">GPS заглушили — часы насчитали лишние километры и нарисовали ерунду. Даёшь файл тренировки и трассу, получаешь файл с правильной дистанцией, темпом и картой. Пульс, каденс, мощность и всё остальное с часов остаётся как было. Файлы никуда не отправляются — всё считается прямо в браузере.</p>
+
+  <section class="card">
+    <div class="step"><b>1</b><h2>Файл тренировки</h2></div>
+    <label class="drop" id="dropFit">
+      <input type="file" id="fitInput" accept=".fit,.zip,.FIT,.ZIP" multiple>
+      Перетащи сюда или нажми, чтобы выбрать<br><small>FIT с часов или ZIP «оригинала» из Garmin Connect / Strava. Если тренировка разорвалась на куски — выбери все, склеятся.</small>
+    </label>
+    <ul class="files" id="fitList"></ul>
+  </section>
+
+  <section class="card">
+    <div class="step"><b>2</b><h2>Где бежал</h2></div>
+    <div class="tabs" role="tablist">
+      <button role="tab" data-tab="coferan" aria-selected="true">Коферан</button>
+      <button role="tab" data-tab="nab" aria-selected="false">Набережная DH</button>
+      <button role="tab" data-tab="own" aria-selected="false">Свой трек</button>
+    </div>
+    <div class="panel" data-panel="coferan">
+      <p class="fine">Круг 10,1 км от старта клуба.</p>
+      <label class="opt"><input type="radio" name="dir" value="coferan_cw" checked> <span>По часовой</span></label>
+      <label class="opt"><input type="radio" name="dir" value="coferan_ccw"> <span>Против часовой</span></label>
+    </div>
+    <div class="panel hidden" data-panel="nab">
+      <p class="fine">Трасса Die Hard на набережной: 22,1 км туда-обратно с разворотом на 16,4 км. Бежал не весь круг — нарисуй свой трек.</p>
+    </div>
+    <div class="panel hidden" data-panel="own">
+      <p class="fine">Нарисуй маршрут в <a href="https://gpx.studio/ru/" target="_blank" rel="noopener">gpx.studio</a> от точки старта до финиша, по ходу движения, и скачай GPX.</p>
+    <div id="ownGpx">
+      <label class="drop" id="dropGpx">
+        <input type="file" id="gpxInput" accept=".gpx,.GPX">
+        <span id="gpxName">Выбрать GPX</span>
+      </label>
+      <label class="opt"><input type="checkbox" id="reverse"> <span>Бежал в обратную сторону<small>Трек нарисован наоборот — развернуть.</small></span></label>
+    </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="step"><b>3</b><h2>Чему верить в дистанции</h2></div>
+    <label class="opt"><input type="radio" name="dist" value="track" checked> <span>Длине трассы<small>Часы считали шагами и врали — дистанция будет ровно как у трассы, а часы только покажут, где ты ускорялся и где стоял.</small></span></label>
+    <label class="opt"><input type="radio" name="dist" value="sensor"> <span>Своему датчику<small>У тебя Stryd или другой подножный датчик, и он не отваливался — его метры остаются, трасса нужна только для карты.</small></span></label>
+    <details>
+      <summary>Тонкие настройки</summary>
+      <label class="opt"><input type="checkbox" id="ignoreGps"> <span>Не верить GPS часов совсем<small>Если часы рисовали точки в чистом поле или на другом берегу — подмена сигнала.</small></span></label>
+      <label class="opt"><input type="checkbox" id="keepSpikes"> <span>Не срезать развороты<small>Для своего трека с разворотом «туда-обратно»: иначе острый разворот может принять за ошибку рисовки.</small></span></label>
+      <label class="opt"><span>Круги:&nbsp;
+        <select id="laps">
+          <option value="auto">как у часов (автокруги по км — пересчитать)</option>
+          <option value="keep">как у часов, не трогать</option>
+          <option value="km">нарезать заново по 1 км</option>
+        </select></span></label>
+    </details>
+  </section>
+
+  <button class="go" id="go" disabled>Исправить</button>
+  <p class="status" id="status">Загружаю расчётный модуль…</p>
+
+  <section class="card hidden" id="result">
+    <div class="step"><b>✓</b><h2 id="resTitle">Готово</h2></div>
+    <div class="big" id="big"></div>
+    <div id="map"></div>
+    <div class="legend"><span><i style="background:var(--track)"></i>исправленный трек</span><span><i style="background:var(--gps)"></i>что рисовали часы</span></div>
+    <ul class="msgs" id="msgs"></ul>
+    <a class="go dl" id="download" href="#">Скачать исправленный FIT</a>
+    <p class="fine" id="lapsInfo"></p>
+  </section>
+
+  <section class="card how">
+    <div class="step"><b>?</b><h2>Где взять файл и куда залить</h2></div>
+    <h3>Garmin</h3>
+    <p>Garmin Connect в браузере → тренировка → шестерёнка → «Экспорт оригинала». Скачается ZIP — его можно кидать сюда как есть. Залить обратно: удали старую тренировку, затем значок облака → «Импорт данных».</p>
+    <h3>Strava</h3>
+    <p>Тренировка на сайте → «…» → «Экспорт оригинала». Залить: удали старую, затем <a href="https://www.strava.com/upload/select" target="_blank" rel="noopener">strava.com/upload/select</a>.</p>
+    <h3>Amazfit / Zepp</h3>
+    <p>Zepp сам FIT не отдаёт. Если тренировка ушла в Strava — бери там «Экспорт оригинала». Залить: удали исходник в Zepp, затем импорт файла в приложении.</p>
+    <h3>Почему так работает</h3>
+    <p>Без спутников часы считают дистанцию по шагам и закладывают длину шага, которой у тебя нет — на набережной это лишние 25–30%. Здесь форма маршрута берётся из трассы, а часы только раскладывают её по времени: где быстрее, где медленнее, где стоял. Если GPS иногда пробивался, точки привязываются к трассе и раскладка становится точнее.</p>
+    <p class="fine">Пробежал не всю трассу, а кусок — нарисуй свой трек именно того, что пробежал.</p>
+  </section>
+
+  <footer>trek_rebuild · файлы обрабатываются только на твоём устройстве</footer>
+</main>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
