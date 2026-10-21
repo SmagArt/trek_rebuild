@@ -3,7 +3,7 @@
 const PYODIDE = 'https://cdn.jsdelivr.net/pyodide/v0.27.7/full/';
 const PKG = ['__init__.py', 'fit.py', 'geo.py', 'engine.py', 'routes.py', 'web.py', 'convert.py',
              'routes/naberezhnaya.gpx', 'routes/coferan.gpx'];
-const VERSION = '9';   // поднимать при смене файлов пакета — сбрасывает кэш браузера
+const VERSION = '10';   // поднимать при смене файлов пакета — сбрасывает кэш браузера
 
 importScripts(PYODIDE + 'pyodide.js');
 

@@ -1,6 +1,6 @@
 // Страница trek_rebuild: сбор файлов и настроек, вызов воркера, отчёт и карта.
 const $ = (id) => document.getElementById(id);
-const worker = new Worker('worker.js?v=9');
+const worker = new Worker('worker.js?v=10');
 const state = { fits: [], gpx: null, ready: false, busy: false, url: null, map: null };
 
 // ── файлы ───────────────────────────────────────────────────────────────────
@@ -11,6 +11,7 @@ function readFile(f) {
 
 async function addFits(list) {
   for (const f of list) state.fits.push(await readFile(f));
+  if (list.length) goal('fit_added', { files: list.length });
   renderFits();
 }
 
@@ -42,6 +43,7 @@ dropZone($('dropFit'), $('fitInput'), addFits);
 dropZone($('dropGpx'), $('gpxInput'), async (files) => {
   if (!files.length) return;
   state.gpx = await readFile(files[0]);
+  goal('gpx_added');
   $('gpxName').textContent = state.gpx.name;
   update();
 });
@@ -82,6 +84,7 @@ $('go').onclick = () => {
   update();
   $('status').textContent = 'Считаю…';
   const own = route() === '';
+  goal('run', { route: route() || 'own', distance: document.querySelector('input[name="dist"]:checked').value });
   worker.postMessage({
     type: 'run',
     files: state.fits,
@@ -106,8 +109,11 @@ worker.onmessage = (e) => {
   } else if (m.type === 'result') {
     state.busy = false;
     update();
+    goal(m.report.ok ? 'rebuilt' : 'rebuild_failed', { route: route() || 'own' });
     show(m.report, m.bytes);
   } else if (m.type === 'error') {
+    // не загрузился Pyodide с CDN — так видно, если у кого-то из РФ его режут
+    goal(state.ready ? 'worker_error' : 'engine_load_failed');
     state.busy = false;
     $('status').innerHTML = '';
     const s = document.createElement('span');
@@ -162,6 +168,7 @@ function show(rep, bytes) {
   const a = $('download');
   a.href = state.url;
   a.download = rep.source.replace(/\.(fit|zip|gpx|tcx)$/i, '') + '_trek.fit';
+  a.onclick = () => goal('downloaded');
 
   drawMap(rep);
   box.scrollIntoView({ behavior: 'smooth', block: 'start' });
