@@ -129,6 +129,8 @@ def check(path, live_every=0, partial=False, keep_live=False):
     skip = {18, 19, 34}
     ca = Counter(m.gnum for m in f.msgs if m.gnum not in skip)
     cb = Counter(m.gnum for m in g.msgs if m.gnum not in skip)
+    # движок дописывает стоячие записи в паузы часов — это не чужое, считаем отдельно
+    cb[20] -= rep['pause_fill']
     if ca != cb:
         lost.append(f'сообщения {dict(ca - cb)} / лишние {dict(cb - ca)}')
     import fitparse

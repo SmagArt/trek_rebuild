@@ -741,7 +741,9 @@ def rebuild(fits, gpx, distance='track', reverse=False, keep_spikes=False, ignor
                      + ' — дорога прямая или нарисовано напрямик?')
 
     # ── запись ──
-    out_fit, lap_info = _write(files, pieces, recs, events, spans, laps, warns)
+    out_fit, lap_info, n_fill = _write(files, pieces, recs, events, spans, laps, warns)
+    if n_fill:
+        log.append(f'Паузы часов заполнены стоячими записями: {n_fill} с (иначе Strava считает дыру бегом)')
     data = fit.write(out_fit)
 
     # ── проверка результата ──
@@ -775,7 +777,7 @@ def rebuild(fits, gpx, distance='track', reverse=False, keep_spikes=False, ignor
         'speed': round(dist / 1000 / ((elapsed - paused) / 3600), 1) if elapsed > paused and dist > 0 else None,
         'sport': pieces[0]['sport'],
         'mode': distance, 'pieces': len(pieces), 'records': len(rr),
-        'laps': lap_info,
+        'laps': lap_info, 'pause_fill': n_fill,
         'track': [(round(p[0], 6), round(p[1], 6)) for p in poly],
         'watch_gps': [(round(r['lat'], 6), round(r['lon'], 6)) for r in recs[::5] if r['lat'] is not None],
         'warnings': warns, 'notes': notes, 'log': log,
@@ -1017,6 +1019,7 @@ def _write(files, pieces, recs, events, spans, laps_mode, warns):
 
     out, seen_dev = [], set()
     sessions, activities = [], []
+    last_rec, n_fill = None, 0
     for k, i in enumerate(order):
         f = files[i]
         for m in f.msgs:
@@ -1046,7 +1049,13 @@ def _write(files, pieces, recs, events, spans, laps_mode, warns):
                 r = by_key.get((i, t))
                 if r is None:          # перекрытие с соседним куском — отброшено
                     continue
-                out.append(_fix_record(m, r, cache))
+                fixed = _fix_record(m, r, cache)
+                if last_rec is not None:
+                    fill = _pause_fill(last_rec, t, spans, cache)
+                    n_fill += len(fill)
+                    out.extend(fill)
+                out.append(fixed)
+                last_rec = fixed
                 continue
             out.append(m)
 
@@ -1122,7 +1131,7 @@ def _write(files, pieces, recs, events, spans, laps_mode, warns):
 
     res = fit.FitFile(out, first.protocol, first.profile)
     res.cache = cache
-    return res, lap_info
+    return res, lap_info, n_fill
 
 
 def _fix_record(m, r, cache):
@@ -1138,7 +1147,30 @@ def _fix_record(m, r, cache):
         m.set(6, r['v'] * 1000, UINT16, cache)
     if r['lele'] is not None and m.get(2) is None and m.get(78) is None:
         m.set(2, (r['lele'] + 500) * 5, UINT16, cache)
+    if m.get(3) == 0:        # пульс 0 — датчик не дал значения; Strava рисует провал до нуля
+        m.set(3, None, UINT8, cache)
     return m
+
+
+def _pause_fill(last, t, spans, cache):
+    """Дыра в записи целиком внутри паузы часов -> посекундные записи «стою»: место и
+    метры прежние, скорость 0, без пульса и каденса. Иначе Strava тянет дыру как бег.
+    Дыры на ходу (смарт-запись Garmin пишет раз в несколько секунд) не трогаем."""
+    t0 = last.timestamp()
+    if t - t0 <= 1 or paused_between(spans, t0, t) < t - t0 - 1:
+        return []
+    out = []
+    for tt in range(t0 + 1, t):
+        c = last.copy()
+        c.set(253, tt, UINT32, cache)
+        for fnum, typ in ((73, UINT32), (6, UINT16)):
+            if c.get(fnum) is not None:
+                c.set(fnum, 0, typ, cache)
+        for fnum in (3, 4):
+            if c.get(fnum) is not None:
+                c.set(fnum, None, UINT8, cache)
+        out.append(c)
+    return out
 
 
 def _fix_lap(m, recs, spans, cache):
