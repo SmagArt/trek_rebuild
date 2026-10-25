@@ -2,8 +2,8 @@
 // пока Python грузится (~10 МБ при первом заходе) и считает.
 const PYODIDE = 'https://cdn.jsdelivr.net/pyodide/v0.27.7/full/';
 const PKG = ['__init__.py', 'fit.py', 'geo.py', 'engine.py', 'routes.py', 'web.py', 'convert.py',
-             'routes/naberezhnaya.gpx', 'routes/coferan.gpx'];
-const VERSION = '10';   // поднимать при смене файлов пакета — сбрасывает кэш браузера
+             'routes/naberezhnaya.gpx', 'routes/coferan.gpx', 'routes/gorny_krug.gpx'];
+const VERSION = '11';   // поднимать при смене файлов пакета — сбрасывает кэш браузера
 
 importScripts(PYODIDE + 'pyodide.js');
 

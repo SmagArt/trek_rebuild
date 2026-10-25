@@ -1,6 +1,6 @@
 // Страница trek_rebuild: сбор файлов и настроек, вызов воркера, отчёт и карта.
 const $ = (id) => document.getElementById(id);
-const worker = new Worker('worker.js?v=10');
+const worker = new Worker('worker.js?v=11');
 const state = { fits: [], gpx: null, ready: false, busy: false, url: null, map: null };
 
 // ── файлы ───────────────────────────────────────────────────────────────────
