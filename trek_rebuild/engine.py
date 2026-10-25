@@ -62,6 +62,17 @@ LIVE_JUMP_M = 30       # прыжок фикса сверх потолка ск�
 LIVE_NEAR_M = 100      # медиана дальше от трассы — подмена сигнала, не живой GPS
 LIVE_BLEND_S = 120     # за столько секунд в дыре гаснет поправка от края живого куска
 
+# ele: привязка по высоте барометра на холмистой трассе
+ELE_GRID_M = 5.0       # шаг сетки по трассе
+ELE_DT_S = 5           # шаг по времени движения (длинные записи — реже, не больше ~800 шагов)
+ELE_RELIEF_M = 15      # перепад трассы меньше — высота ничего не скажет
+ELE_SIGMA_H = 3.0      # м: разброс барометра против высоты трассы
+ELE_BAND_M = (40, 0.15, 400)   # полоса поиска: 40 м у якоря + 15 % пути от него, не шире 400 м
+ELE_GRADE = 0.04       # якорь — только где трасса идёт в горку или под горку
+ELE_ANCHOR_S = 20      # не чаще раза в столько секунд
+ELE_GAIN = 0.75        # высота должна сойтись хотя бы на четверть лучше, чем по шагомеру
+ELE_RMS_MAX = 6.0      # и не хуже этого, иначе барометр или трасса не те
+
 TIMER_START = 0
 TIMER_STOPS = {1, 4, 8, 9}        # stop, stop_all, stop_disable, stop_disable_all
 
@@ -528,9 +539,11 @@ def set_speed_pair(m, num16, num32, val, cache, add16=True):
 # ── главный проход ──────────────────────────────────────────────────────────
 
 def rebuild(fits, gpx, distance='track', reverse=False, keep_spikes=False, ignore_gps=False,
-            anchors='auto', order=None, laps='auto', timeless=False, preset=False, keep_live=False):
+            anchors='auto', order=None, laps='auto', timeless=False, preset=False, keep_live=False,
+            ele=True):
     """fits — байты кусков FIT (порядок неважен), gpx — байты трека.
     keep_live — где GPS часов живой, оставить его трек, трассой залатать только дыры.
+    ele — на холмистой трассе с высотами уточнять место по барометру часов.
     reverse — трек в обратную сторону; timeless — не верить времени точек GPX
     (встроенные трассы, нарисованные в редакторе); preset — трек проверенный,
     замечания к его рисовке не нужны; laps: auto — авто-круги
@@ -685,20 +698,12 @@ def rebuild(fits, gpx, distance='track', reverse=False, keep_spikes=False, ignor
         a, b = recs[x - 1]['ts'], recs[x]['ts']
         acc += (b - a) - paused_between(spans, a, b)
         mv[x] = acc
-    L = [0.0] * n
-    for (xa, La), (xb, Lb) in zip(anc, anc[1:]):
-        Da, Db = recs[xa]['d'], recs[xb]['d']
-        ta, tb = mv[xa], mv[xb]
-        if distance == 'sensor':
-            byd = (Db - Da) > 0 and (Db - Da) >= 0.5 * (Lb - La)
-        else:
-            byd = (Db - Da) > 0
-        for x in range(xa, xb + 1):
-            if byd:
-                f_ = (recs[x]['d'] - Da) / (Db - Da)
-            else:
-                f_ = (mv[x] - ta) / (tb - ta) if tb > ta else 0.0
-            L[x] = La + (Lb - La) * min(max(f_, 0.0), 1.0)
+    L = positions(recs, anc, mv, distance)
+    if ele and distance != 'sensor':
+        extra = ele_anchors(recs, anc, L, mv, poly, cum, log, notes)
+        if extra:
+            anc = sorted(set(anc) | set(extra))
+            L = positions(recs, anc, mv, distance)
 
     # ── ступеньки ──
     cap = SPEED_CAP.get(pieces[0]['sport'], SPEED_CAP_DEFAULT)
@@ -776,6 +781,157 @@ def rebuild(fits, gpx, distance='track', reverse=False, keep_spikes=False, ignor
         'warnings': warns, 'notes': notes, 'log': log,
     }
     return data, report
+
+
+def positions(recs, anc, mv, distance):
+    """Место на линии для каждой записи: между якорями — по доле метров часов
+    (метров нет — по доле времени движения)."""
+    L = [0.0] * len(recs)
+    for (xa, La), (xb, Lb) in zip(anc, anc[1:]):
+        Da, Db = recs[xa]['d'], recs[xb]['d']
+        ta, tb = mv[xa], mv[xb]
+        if distance == 'sensor':
+            byd = (Db - Da) > 0 and (Db - Da) >= 0.5 * (Lb - La)
+        else:
+            byd = (Db - Da) > 0
+        for x in range(xa, xb + 1):
+            if byd:
+                f_ = (recs[x]['d'] - Da) / (Db - Da)
+            else:
+                f_ = (mv[x] - ta) / (tb - ta) if tb > ta else 0.0
+            L[x] = La + (Lb - La) * min(max(f_, 0.0), 1.0)
+    return L
+
+
+def _median(xs):
+    xs = sorted(xs)
+    return xs[len(xs) // 2]
+
+
+def ele_anchors(recs, anc, L, mv, poly, cum, log, notes):
+    """Привязка по высоте. Шагомер под глушилкой врёт неравномерно (устал, шаг короче —
+    перебор растёт), а барометр часов на холмистой трассе пишет её профиль. Высоту
+    записи выравниваем с высотой трассы (DTW: по линии только вперёд, не быстрее
+    потолка, шаги близки к шагам шагомера) в полосе вокруг хода шагомера; к уже
+    известным якорям полоса сужается. Якоря ставятся там, где трасса заметно идёт
+    вверх или вниз: на ровном высота места не знает. Не стало лучше — ничего не меняем."""
+    if any(p[2] is None for p in poly):
+        return []
+    G = ELE_GRID_M
+    M = int(cum[-1] // G) + 1
+    E = [at_distance(poly, cum, j * G)[2] for j in range(M)]
+    if max(E) - min(E) < ELE_RELIEF_M:
+        return []
+    n = len(recs)
+    if sum(r['alt'] is not None for r in recs) < 0.8 * n or mv[-1] < 300:
+        return []
+    dt_s = max(ELE_DT_S, mv[-1] / 800)
+    ks, last = [], None
+    for x in range(n):
+        if recs[x]['alt'] is not None and (last is None or mv[x] - mv[last] >= dt_s):
+            ks.append(x)
+            last = x
+    if len(ks) < 30:
+        return []
+    alt = [recs[x]['alt'] for x in ks]
+    exp = [L[x] / G for x in ks]
+    aL = [a[1] for a in anc]
+    b0, k0, bmax = ELE_BAND_M
+    band = []
+    for x in ks:
+        i = bisect.bisect_left(aL, L[x])
+        near = min(abs(L[x] - aL[j]) for j in (i - 1, i) if 0 <= j < len(aL))
+        band.append(int(min(bmax, b0 + k0 * near) / G) + 1)
+
+    def resid(path, off):
+        e = [alt[k] - off[k] - E[path[k]] for k in range(len(ks))]
+        return (sum(v * v for v in e) / len(e)) ** 0.5
+
+    def offsets(path):
+        # барометр уходит от высоты трассы на постоянную плюс медленный дрейф погоды —
+        # скользящая медиана за ±10 мин
+        d = [alt[k] - E[path[k]] for k in range(len(ks))]
+        w = max(1, int(600 / dt_s))
+        return [_median(d[max(0, k - w):k + w + 1]) for k in range(len(ks))]
+
+    path = [min(max(int(round(v)), 0), M - 1) for v in exp]
+    off = offsets(path)
+    before = resid(path, off)
+    for _ in range(2):
+        path = _ele_dtw(alt, off, E, exp, band, [mv[x] for x in ks], SPEED_CAP_DEFAULT)
+        if path is None:
+            return []
+        off = offsets(path)
+    after = resid(path, off)
+    if after > ELE_GAIN * before or after > ELE_RMS_MAX:
+        notes.append(f'высота часов не помогла уточнить место на трассе (расхождение {before:.1f} → '
+                     f'{after:.1f} м) — метры разложены по шагомеру')
+        return []
+    out, last_t = [], None
+    for k in range(len(ks)):
+        x, j = ks[k], path[k]
+        lo, hi = max(0, j - 5), min(M - 1, j + 5)
+        if abs(E[hi] - E[lo]) < ELE_GRADE * (hi - lo) * G:
+            continue
+        if last_t is not None and mv[x] - last_t < ELE_ANCHOR_S:
+            continue
+        if any(abs(x - a[0]) < 3 for a in anc):
+            continue
+        out.append((x, j * G))
+        last_t = mv[x]
+    allx = sorted(set(anc) | set(out))
+    if any(b[1] < a[1] for a, b in zip(allx, allx[1:])):
+        notes.append('высота часов разошлась с GPS по месту на трассе — привязка по высоте отключена')
+        return []
+    log.append(f'Привязка по высоте: {len(out)} точек, расхождение высоты с трассой '
+               f'{before:.1f} → {after:.1f} м')
+    return out
+
+
+def _ele_dtw(alt, off, E, exp, band, mvk, cap):
+    """Путь по сетке трассы для каждого шага по времени. Цена — квадрат расхождения
+    высоты плюс отход шага от шага шагомера (медленный дрейф его ошибки дёшев)."""
+    K, M, G = len(alt), len(E), ELE_GRID_M
+    sh = 1.0 / ELE_SIGMA_H ** 2
+
+    def window(k):
+        return max(0, int(exp[k]) - band[k]), min(M - 1, int(exp[k]) + band[k])
+
+    lo, hi = window(0)
+    prev = {j: (alt[0] - off[0] - E[j]) ** 2 * sh for j in range(lo, hi + 1)}
+    back = [None] * K
+    for k in range(1, K):
+        lo, hi = window(k)
+        smax = int(cap * (mvk[k] - mvk[k - 1]) / G) + 1
+        e = exp[k] - exp[k - 1]
+        se = 1.0 / (0.3 * max(e, 0.0) + 1.0) ** 2
+        pj = sorted(prev)
+        pc = [prev[j] for j in pj]
+        cur, bk = {}, {}
+        base_h = alt[k] - off[k]
+        for j in range(lo, hi + 1):
+            i0 = bisect.bisect_left(pj, j - smax)
+            i1 = bisect.bisect_right(pj, j)
+            if i0 >= i1:
+                continue
+            best, bj = None, None
+            for i in range(i0, i1):
+                ds = j - pj[i] - e
+                c = pc[i] + ds * ds * se
+                if best is None or c < best:
+                    best, bj = c, pj[i]
+            dh = base_h - E[j]
+            cur[j] = best + dh * dh * sh
+            bk[j] = bj
+        if not cur:
+            return None
+        prev, back[k] = cur, bk
+    path, j = [0] * K, min(prev, key=prev.get)
+    for k in range(K - 1, 0, -1):
+        path[k] = j
+        j = back[k][j]
+    path[0] = j
+    return path
 
 
 def _shift(r, poly, cum, at):
