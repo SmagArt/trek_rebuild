@@ -131,6 +131,9 @@ def despike(ts, xs, spans, cap):
     Возвращает [(ts, ступенька м, окно с)] того, что разложено, и что не вышло."""
     n = len(xs)
     in_pause = [any(s <= t < e for s, e in spans) for t in ts]
+    # секунды хода до записи: первая запись после паузы стоит через дыру,
+    # и секунды паузы метров получать не должны
+    run = [0] + [ts[k] - ts[k - 1] - paused_between(spans, ts[k - 1], ts[k]) for k in range(1, n)]
     hard = set()
     for s, e in spans:
         if e - s > DESPIKE_PAUSE_S:
@@ -151,7 +154,8 @@ def despike(ts, xs, spans, cap):
         a, b, ok = i - 1, i, False
         for _ in range(300):
             mov = [k for k in range(a + 1, b + 1) if not in_pause[k]]
-            if mov and (xs[b] - xs[a]) / sum(ts[k] - ts[k - 1] for k in mov) <= target:
+            secs = sum(run[k] for k in mov)
+            if secs > 0 and (xs[b] - xs[a]) / secs <= target:
                 ok = True
                 break
             grow = False
@@ -167,12 +171,12 @@ def despike(ts, xs, spans, cap):
             continue
         fixed.append((ts[i], step, ts[b] - ts[a]))
         mov = [k for k in range(a + 1, b + 1) if not in_pause[k]]
-        secs = sum(ts[k] - ts[k - 1] for k in mov)
+        secs = sum(run[k] for k in mov)
         total = xs[b] - xs[a]
         cur = xs[a]
         for k in range(a + 1, b + 1):
             if not in_pause[k]:
-                cur += total * (ts[k] - ts[k - 1]) / secs
+                cur += total * run[k] / secs
             xs[k] = min(cur, xs[b])
         i = b + 1
     return fixed, left
@@ -602,6 +606,13 @@ def rebuild(fits, gpx, distance='track', reverse=False, keep_spikes=False, ignor
         segs, timed = reverse_segs(segs), False
     elif timeless:
         segs, timed = [[(p[0], p[1], p[2], None) for p in s] for s in segs], False
+    if timed and anchors != 'time':
+        # трек целиком из другого дня (своя же прошлая пробежка как трасса) —
+        # его время к этой записи отношения не имеет
+        t0, t1 = recs[0]['ts'], recs[-1]['ts']
+        if all(s[-1][3] < t0 - 3600 or s[0][3] > t1 + 3600 for s in segs):
+            log.append(f'Трек снят {clock.date(segs[0][0][3])} — взят как трасса, время его точек не используется')
+            segs, timed = [[(p[0], p[1], p[2], None) for p in s] for s in segs], False
     mode = anchors if anchors != 'auto' else ('time' if timed else 'space')
     if mode == 'time' and not timed:
         raise RebuildError('В GPX нет времени у всех точек — привязка по времени невозможна.')
